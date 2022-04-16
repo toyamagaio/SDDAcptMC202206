@@ -40,10 +40,6 @@ using namespace std;
 
 const int NCanvas=5;
 const int NSDD=1;//num. of SDD
-struct TreeBranch{
-  double eg;
-};
-static TreeBranch tr;
 
 class SDDAcptMC
 {
@@ -55,20 +51,34 @@ class SDDAcptMC
   void Loop();
   bool Draw(); 
   void SaveCanvas(string PdfFileName); 
+  void SetPmuDistType( int type )  { pmu_type = type; }
   void SetMaxEvent( int N )  { ENumMax = N; }
   void SetDiameter( double d )  { D_Be = d; }
   void SetBranch();
+  void SetNBeXray(bool flag){fix_NmuBeXray_flag=flag;}
+  void SetSDDx(double x){SDDx=x;}
   void   CalcMap();
   void InitializeTreeBr();
 
   private:
     Setting *set;
+    bool fix_NmuBeXray_flag;
     int ENum, ENumMax;
+    int pmu_type;
+    int BeHitCounter, SDDHitCounter;
     double D_Be;//diameter of Be target [mm]
+    double SDDx;//xpos of SDD
     TVector3 GetUniformDistribution(double costMin=-1., double costMax = 1.);
+    void ConvertToNKS2Coordinate(TVector3 &dir);
     double GetUniformR(double Rmax);
-    int IsIntersectSDDSurface(TVector3 posX, TVector3 dirX, TVector3 &sectVec);
+    int  IsIntersectSDDSurface(TVector3 posX, TVector3 dirX, TVector3 &sectVec);
+    bool IsIntersectBeTarget(TVector3 posPmu, TVector3 dirPmu, TVector3 &sectVec);
+    TH1D *h_r_pmu_gene, *h_theta_pmu_gene, *h_x_pmu_gene;
+    TH2D *h2_yz_pmu_gene, *h2_yz_pmu_gene_wBeHit;
+    TH1D *h_cost_pmu_gene, *h_cost_pmu_gene_wBeHit;
+
     TH1D *h_r_muBeXray_gene, *h_theta_muBeXray_gene;
+    TH1D *h_x_muBeXray_gene, *h_y_muBeXray_gene;
     TH2D *h2_xy_muBeXray_gene, *h2_xy_muBeXray_gene_wSDDall;
     TH2D *h2_xy_muBeXray_wSDD[NSDD], *h2_xy_muBeXray_atSDD[NSDD];
     TH1D *h;
@@ -143,6 +153,8 @@ SDDAcptMC::SDDAcptMC()
   set->SetTLine(tline,2,2,1);
 
   gRandom -> SetSeed( time(NULL) ); //seed set by time
+  fix_NmuBeXray_flag=false;
+  SDDx  = 0.;
 }
 ////////////////////////////////////////////////////////////////////////////
 SDDAcptMC::~SDDAcptMC(){
@@ -157,11 +169,29 @@ void SDDAcptMC::MakeHist(string ofname){
   cout<<"newed ofp"<<endl;
 
   ofp->cd();
+
+  h_cost_pmu_gene         = new TH1D("h_cost_pmu_gene"        ,"", 200,  -1, 1);
+  h_cost_pmu_gene_wBeHit  = new TH1D("h_cost_pmu_gene_wBeHit" ,"", 200,  -1, 1);
+  h_r_pmu_gene            = new TH1D("h_r_pmu_gene"           ,"", 100,   0, 50);
+  h_theta_pmu_gene        = new TH1D("h_theta_pmu_gene"       ,"", 100, -1.*TMath::Pi(), TMath::Pi());
+  h_x_pmu_gene            = new TH1D("h_x_pmu_gene"           ,"", 100,-100, 0);
+  h2_yz_pmu_gene          = new TH2D("h2_yz_pmu_gene"         ,"", 100, -50, 50, 100, -100, 0); 
+  h2_yz_pmu_gene_wBeHit   = new TH2D("h2_yz_pmu_gene_wBeHit"  ,"", 100, -50, 50, 100, -100, 0); 
+  set->SetTH1(h_cost_pmu_gene         ,"p#mu cos#theta"                ,"cos#theta"    ,"Counts/0.1"    ,1,3000,0);
+  set->SetTH1(h_cost_pmu_gene_wBeHit  ,"p#mu cos#theta (w/ Be hit)"    ,"cos#theta"    ,"Counts/0.1"    ,2,3001,2);
+  set->SetTH1(h_r_pmu_gene            ,"p#mu source point (R)"         ,"R [mm]"       ,"Counts"        ,1,3000,0);
+  set->SetTH1(h_theta_pmu_gene        ,"p#mu source point (#theta)"    ,"#theta [rad]" ,"Counts"        ,1,3000,0);
+  set->SetTH1(h_x_pmu_gene            ,"p#mu source point X"           ,"X [mm]" ,"Counts"        ,1,3000,0);
+  set->SetTH2(h2_yz_pmu_gene          ,"p#mu source point"             ,"Y [mm]" ,"Z [mm]" );
+  set->SetTH2(h2_yz_pmu_gene_wBeHit   ,"p#mu source point (w/ Be hit)" ,"Y [mm]" ,"Z [mm]" );
+
   h        = new TH1D("h","",100,-10, 10);
   h_cost_muBeXray_gene         = new TH1D("h_cost_muBeXray_gene"        ,"",200,-1, 1);
   h_cost_muBeXray_gene_wSDDall = new TH1D("h_cost_muBeXray_gene_wSDDall","",200,-1, 1);
   h_r_muBeXray_gene            = new TH1D("h_r_muBeXray_gene"    ,"", 100, 0, 50);
-  h_theta_muBeXray_gene        = new TH1D("h_theta_muBeXray_gene","", 100, 0, 2.*TMath::Pi());
+  h_theta_muBeXray_gene        = new TH1D("h_theta_muBeXray_gene","", 100, -1.*TMath::Pi(), TMath::Pi());
+  h_x_muBeXray_gene            = new TH1D("h_x_muBeXray_gene"    ,"",  50, -50, 50);
+  h_y_muBeXray_gene            = new TH1D("h_y_muBeXray_gene"    ,"",  50, -50, 50);
   h2_xy_muBeXray_gene              = new TH2D("h2_xy_muBeXray_gene"        ,"",       100, -50, 50, 100, -50, 50); 
   h2_xy_muBeXray_gene_wSDDall      = new TH2D("h2_xy_muBeXray_gene_wSDDall","",       100, -50, 50, 100, -50, 50); 
   set->SetTH1(h  ,"","M_{d#pi+} [GeV/#it{c}^{2}]" ,"Counts"    ,1,3001,2);
@@ -169,20 +199,24 @@ void SDDAcptMC::MakeHist(string ofname){
   set->SetTH1(h_cost_muBeXray_gene_wSDDall  ,"#muBe cos#theta (w/ SDD hit)","cos#theta"    ,"Counts/0.1"    ,2,3001,2);
   set->SetTH1(h_r_muBeXray_gene             , "#muBe source point (R)"     ,"R [mm]"       ,"Counts"        ,1,3000,0);
   set->SetTH1(h_theta_muBeXray_gene         , "#muBe source point (#theta)","#theta [rad]" ,"Counts"        ,1,3000,0);
+  set->SetTH1(h_x_muBeXray_gene             , "#muBe source point (X)"     ,"X [mm]"       ,"Counts"        ,1,3000,0);
+  set->SetTH1(h_y_muBeXray_gene             , "#muBe source point (Y)"     ,"Y [mm]"       ,"Counts"        ,1,3000,0);
   set->SetTH2(h2_xy_muBeXray_gene            , "#muBe source point"             ,"X [mm]" ,"Y [mm]" );
   set->SetTH2(h2_xy_muBeXray_gene_wSDDall    , "#muBe source point (w/ SDD hit)","X [mm]" ,"Y [mm]" );
   h_cost_muBeXray_gene         ->SetStats(0);
   h_cost_muBeXray_gene_wSDDall ->SetStats(0);
 
   for(int n=0;n<NSDD;n++){
-    h2_xy_muBeXray_wSDD[n]       = new TH2D(Form("h2_xy_muBeXray_wSDD" ,n+1),"",       100, -50, 50, 100, -50, 50); 
-    h2_xy_muBeXray_atSDD[n]      = new TH2D(Form("h2_xy_muBeXray_atSDD",n+1),"",       100, -20, 20, 100, -20, 20); 
+    h2_xy_muBeXray_wSDD[n]       = new TH2D(Form("h2_xy_muBeXray_wSDD%d" ,n+1),"",       100, -50, 50, 100, -50, 50); 
+    h2_xy_muBeXray_atSDD[n]      = new TH2D(Form("h2_xy_muBeXray_atSDD%d",n+1),"",       100, -50, 50, 100, -50, 50); 
   }
 }
 ////////////////////////////////////////////////////////////////////////////
 void SDDAcptMC::InitSDDsetup(){
 
-  pos_SDD_surf[0].SetXYZ(0.,0.,70.);
+  cout<<"SDDx:"<<SDDx<<endl;
+  pos_SDD_surf[0].SetXYZ(SDDx,0.,25.);//z=70: default
+  //pos_SDD_surf[0].SetXYZ(0.,0.,25.);//z=70: default
   dia_SDD_surf[0]=20.;
   til_SDD_surf[0]=0.;
 
@@ -196,7 +230,7 @@ int SDDAcptMC::IsIntersectSDDSurface(TVector3 posX, TVector3 dirX, TVector3 &sec
     double x_at_SDDz=posX.X() + a*dirX.X();
     double y_at_SDDz=posX.Y() + a*dirX.Y();
     sectVec.SetXYZ(x_at_SDDz,y_at_SDDz,a*dirX.Z());
-    if((x_at_SDDz*x_at_SDDz + y_at_SDDz*y_at_SDDz) < 0.25*dia_SDD_surf[n]*dia_SDD_surf[n]){return n;}
+    if(( (x_at_SDDz-pos_SDD_surf[n].X())*(x_at_SDDz-pos_SDD_surf[n].X()) + (y_at_SDDz-pos_SDD_surf[n].Y())*(y_at_SDDz-pos_SDD_surf[n].Y()) ) < 0.25*dia_SDD_surf[n]*dia_SDD_surf[n]){return n;}
   }
 
 
@@ -204,22 +238,105 @@ int SDDAcptMC::IsIntersectSDDSurface(TVector3 posX, TVector3 dirX, TVector3 &sec
 
 }
 ////////////////////////////////////////////////////////////////////////////
+bool SDDAcptMC::IsIntersectBeTarget(TVector3 posPmu, TVector3 dirPmu, TVector3 &sectVec){
+
+  double a = -posPmu.Z()/dirPmu.Z();//Be target located at z=0
+  double x_at_BeTarget=posPmu.X() + a*dirPmu.X();
+  double y_at_BeTarget=posPmu.Y() + a*dirPmu.Y();
+  sectVec.SetXYZ(x_at_BeTarget,y_at_BeTarget,0.);
+  if(a<0.)return false;
+  if((x_at_BeTarget*x_at_BeTarget + y_at_BeTarget*y_at_BeTarget) < 0.25*D_Be*D_Be){return true;}
+
+  return false;
+
+}
+////////////////////////////////////////////////////////////////////////////
 void SDDAcptMC::Loop(){
   cout<<"Loop"<<endl;
+
+  BeHitCounter = SDDHitCounter = 0;
+
   for(int n=0;n<ENumMax;n++){
-    if(n%2000==0) cout<<n<<" / "<<ENumMax<<endl;
+    if(n%10000==0) cout<<n<<" / "<<ENumMax<<endl;
+    double r_muBeXray    ;
+    double theta_muBeXray;
+    double x_muBeXray    ;
+    double y_muBeXray    ;
+
+    //////////////////////
+    //hot pmu simulation//
+    //////////////////////
+    
+    //source of hot pmu (Solid H2 local coordinate)
+    TVector3 pos_pmu, dir_pmu;//pmu position and direction at H2 target surface
+    double r_pmu     = 0.;
+    double theta_pmu = 0.;
+    double x_pmu  = 0.;
+    double y_pmu  = 0.;
+    if(pmu_type==1){
+      r_pmu     = GetUniformR(30.);
+      theta_pmu = 2.*TMath::Pi()*(gRandom->Uniform()-0.5);
+      x_pmu     = r_pmu*TMath::Cos(theta_pmu);
+      y_pmu     = r_pmu*TMath::Sin(theta_pmu);
+    }else if(pmu_type==2){
+      while(1){
+        x_pmu     = gRandom->Gaus(0.,20.);
+        y_pmu     = gRandom->Gaus(0.,20.);
+        r_pmu     = sqrt(x_pmu*x_pmu + y_pmu*y_pmu);
+        theta_pmu = TMath::ATan2(x_pmu, y_pmu);
+        if(r_pmu<30.)break;
+      }
+    }
+
+    pos_pmu.SetXYZ(x_pmu, y_pmu, -20.);
+    dir_pmu=GetUniformDistribution(0.);
+    double cost_pmu =dir_pmu.Z();
+
+    //convert to global coordinate
+    ConvertToNKS2Coordinate(pos_pmu);
+    pos_pmu.SetZ(pos_pmu.Z()-50.);//offset
+    ConvertToNKS2Coordinate(dir_pmu);
+    //cout<<"pos_pmu.X():"<<pos_pmu.X()<<endl;
+
+    h_cost_pmu_gene          ->Fill(cost_pmu);
+    h_r_pmu_gene             ->Fill(r_pmu);
+    h_theta_pmu_gene         ->Fill(theta_pmu);
+    h_x_pmu_gene             ->Fill(pos_pmu.X());
+    h2_yz_pmu_gene           ->Fill(pos_pmu.Y(), pos_pmu.Z());
+    if(IsIntersectBeTarget(pos_pmu, dir_pmu, pos_pmu_stop)){
+      x_muBeXray     = pos_pmu_stop.X();
+      y_muBeXray     = pos_pmu_stop.Y();
+      r_muBeXray      = sqrt( x_muBeXray*x_muBeXray + y_muBeXray*y_muBeXray );
+      theta_muBeXray  = TMath::ATan2(x_muBeXray, y_muBeXray);//[-pi, pi]
+
+      h_cost_pmu_gene_wBeHit   ->Fill(cost_pmu);
+      h2_yz_pmu_gene_wBeHit    ->Fill(pos_pmu.Y(), pos_pmu.Z());
+ 
+      if(x_muBeXray<-20.)cout<<Form("pos_pmu.X(): %lf, pos_pmu.Z(): %lf, dir_pmu.X(): %lf, dir_pmu.Z(): %lf, x_muBeXray: %lf, cost_pmu: %lf"
+                                    ,     pos_pmu.X(),      pos_pmu.Z(),      dir_pmu.X(),      dir_pmu.Z(),      x_muBeXray,      cost_pmu)<<endl;
+      BeHitCounter++;
+    }else {if(fix_NmuBeXray_flag)n--;continue;}
+
+    ///////////////////
+    //muBe simulation//
+    ///////////////////
+    
     //if(treeout_flag)InitializeTreeBr();
     //double x_muBeXray = D_Be*(gRandom->Uniform(1)-0.5);
     //double y_muBeXray = D_Be*(gRandom->Uniform(1)-0.5);
     //if( (x_muBeXray*x_muBeXray + y_muBeXray*y_muBeXray) > 0.25*D_Be*D_Be){n--;continue;}
-    double r_muBeXray     = GetUniformR(0.5*D_Be);
-    double theta_muBeXray = gRandom->Uniform(2.*TMath::Pi());
-    double x_muBeXray     = r_muBeXray*TMath::Cos(theta_muBeXray);
-    double y_muBeXray     = r_muBeXray*TMath::Sin(theta_muBeXray);
+    
+    //r_muBeXray     = GetUniformR(0.5*D_Be);
+    //theta_muBeXray = 2.*TMath::Pi()*(gRandom->Uniform()-0.5);
+    //x_muBeXray     = r_muBeXray*TMath::Cos(theta_muBeXray);
+    //y_muBeXray     = r_muBeXray*TMath::Sin(theta_muBeXray);
+
     h_r_muBeXray_gene     ->Fill(r_muBeXray);
     h_theta_muBeXray_gene ->Fill(theta_muBeXray);
     h2_xy_muBeXray_gene   ->Fill(x_muBeXray, y_muBeXray);
-    pos_pmu_stop.SetXYZ(x_muBeXray, y_muBeXray, 0.);
+    h_x_muBeXray_gene     ->Fill(x_muBeXray);
+    h_y_muBeXray_gene     ->Fill(y_muBeXray);
+    //pos_pmu_stop.SetXYZ(x_muBeXray, y_muBeXray, 0.);
     dir_muBe_Xray=GetUniformDistribution(0.);
     h_cost_muBeXray_gene  ->Fill(dir_muBe_Xray.Z());
     //dir_muBe_Xray.SetXYZ(0.,0.,1.);
@@ -229,9 +346,11 @@ void SDDAcptMC::Loop(){
       h_cost_muBeXray_gene_wSDDall ->Fill(dir_muBe_Xray.Z());
       h2_xy_muBeXray_wSDD[segSDD]  ->Fill(x_muBeXray, y_muBeXray); 
       h2_xy_muBeXray_atSDD[segSDD] ->Fill(pos_at_SDD.X(), pos_at_SDD.Y()); 
+      SDDHitCounter++;
     }
   }
 
+  cout<<Form("%d %d %d",ENumMax, BeHitCounter, SDDHitCounter)<<endl;
   cout<<h2_xy_muBeXray_gene->Integral()<<endl;
 }
 ////////////////////////////////////////////////////////////////////////////
@@ -278,6 +397,17 @@ TVector3 SDDAcptMC::GetUniformDistribution(double costMin, double costMax)
   return TVector3(sint*cos(phi), sint*sin(phi),cost);//normal coordinate (z is the beam axis)
 }
 //_______________________________________________________________________________________________________________________________
+void  SDDAcptMC::ConvertToNKS2Coordinate(TVector3 &dir)
+{
+  //beam axis z -> x
+  //conversion x->ynew, y->znew, z->xnew,
+  double xnew=dir.Z();
+  double ynew=dir.X();
+  double znew=dir.Y();
+
+  dir.SetXYZ(xnew, ynew, znew);
+}
+//_______________________________________________________________________________________________________________________________
 
 double SDDAcptMC::GetUniformR(double Rmax)
 {
@@ -298,6 +428,24 @@ double SDDAcptMC::GetUniformR(double Rmax)
 bool SDDAcptMC::Draw(){
   int ic=0;
   c[ic]->Clear();c[ic]->Divide(2,2);
+  c[ic]->cd(1);gPad->SetLogz(0);  h_cost_pmu_gene          ->Draw("");
+  c[ic]->cd(2);gPad->SetLogz(0);  h_r_pmu_gene             ->Draw("");
+  c[ic]->cd(3);gPad->SetLogz(0);  h_theta_pmu_gene         ->Draw("");
+  c[ic]->cd(4);gPad->SetLogz(0);  h2_yz_pmu_gene           ->Draw("colz");
+
+  ic++;
+  if(ic>=NCanvas)return false;
+  c[ic]->Clear();c[ic]->Divide(2,2);
+  c[ic]->cd(1);gPad->SetLogy(0);h_cost_pmu_gene          ->Draw("");h_cost_pmu_gene_wBeHit          ->Draw("same");
+  c[ic]->cd(2);gPad->SetLogy(0);h2_yz_pmu_gene           ->Draw("colz");
+  c[ic]->cd(3);gPad->SetLogy(0);h2_yz_pmu_gene_wBeHit    ->Draw("colz");
+  c[ic]->cd(4);gPad->SetLogz(0);h_cost_pmu_gene_wBeHit          ->Draw("");//h_x_pmu_gene             ->Draw("");
+
+  ic++;
+  if(ic>=NCanvas)return false;
+  h2_xy_muBeXray_gene_wSDDall->RebinX(2);
+  h2_xy_muBeXray_gene_wSDDall->RebinY(2);
+  c[ic]->Clear();c[ic]->Divide(2,2);
   c[ic]->cd(1);gPad->SetLogz(0); h2_xy_muBeXray_gene          ->Draw("colz");
   c[ic]->cd(2);gPad->SetLogz(0); h2_xy_muBeXray_gene_wSDDall  ->Draw("colz");
   c[ic]->cd(3);gPad->SetLogz(0); h2_xy_muBeXray_wSDD[0]       ->Draw("colz");
@@ -314,8 +462,10 @@ bool SDDAcptMC::Draw(){
   if(ic>=NCanvas)return false;
   c[ic]->Clear();c[ic]->Divide(2,2);
   c[ic]->cd(1);gPad->SetLogz(0); h2_xy_muBeXray_gene        ->Draw("colz");
-  c[ic]->cd(2);gPad->SetLogz(0); h_r_muBeXray_gene          ->Draw("");
-  c[ic]->cd(3);gPad->SetLogz(0); h_theta_muBeXray_gene      ->Draw("");
+  c[ic]->cd(2);gPad->SetLogz(0); h_y_muBeXray_gene          ->Draw("");
+  c[ic]->cd(3);gPad->SetLogz(0); h_x_muBeXray_gene          ->Draw("");
+  c[ic]->cd(4);gPad->SetLogz(0); h_r_muBeXray_gene          ->Draw("");
+  //c[ic]->cd(3);gPad->SetLogz(0); h_theta_muBeXray_gene      ->Draw("");
 
   return true;
 }
@@ -337,14 +487,14 @@ int main(int argc, char** argv){
   string ofname_root;
   //string ofname_pdf = "tmp.pdf";
   bool draw_flag = true;
-  bool Acc_flag  = false;
-  bool Pcon_flag = false;
   double Dinput=80.;
   int ch;
-  int MaxNum = 1000;
+  int MaxNum   = 1000;
+  int PmuType = 0;
+  int sdd_x = 0;
   string pngname;
   extern char *optarg;
-  while((ch=getopt(argc,argv,"hw:n:bp:d:"))!=-1){
+  while((ch=getopt(argc,argv,"hw:n:bp:d:t:x:"))!=-1){
     switch(ch){
     case 'w':
       ofname = optarg;
@@ -353,12 +503,14 @@ int main(int argc, char** argv){
     case 'd':
       Dinput = atof(optarg);
       break;
-    case 'z':
-      Pcon_flag  = true;
-      cout<<"ppiX b.g."<<endl;
-      break;
     case 'n':
       MaxNum = atoi(optarg);
+      break;
+    case 't':
+      PmuType = atoi(optarg);
+      break;
+    case 'x':
+      sdd_x = atoi(optarg);
       break;
     case 'b':
       draw_flag=false;
@@ -372,6 +524,7 @@ int main(int argc, char** argv){
       cout<<"-p : output pdf filename" <<endl;
       cout<<"-b : batch mode"           <<endl;
       cout<<"-d : diameter of Be target (phi [mm])"     <<endl;
+      cout<<"-t : pmu source poit type 0(default): from center only, 1: phi60 mm uniform, 2: gauss (sigma=20mm)"           <<endl;
       cout<<"-n : maximum number of events to be analysed "<<endl;
       return 0;
       break;
@@ -392,6 +545,9 @@ int main(int argc, char** argv){
   SDDAcptMC *calc = new SDDAcptMC();
   calc->SetMaxEvent(MaxNum);
   calc->SetDiameter(Dinput);
+  calc->SetPmuDistType(PmuType);
+  calc->SetNBeXray(true);//
+  calc->SetSDDx((double)sdd_x);//
   calc->InitSDDsetup();
   calc->MakeHist(ofname_root);
   //calc->SetBranch();
